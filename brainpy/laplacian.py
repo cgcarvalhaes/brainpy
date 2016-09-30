@@ -1,7 +1,7 @@
 import numpy as np
 from numpy.polynomial import legendre
 
-from spatial.spherical_splines import SphericalSplines
+from .spherical_splines import SphericalSplines
 
 
 class Laplacian(SphericalSplines):

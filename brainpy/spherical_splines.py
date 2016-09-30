@@ -1,7 +1,7 @@
 import numpy as np
 from numpy.polynomial import legendre
 
-from spatial.utils import norm_rows
+from .utils import norm_rows
 
 
 class SphericalSplines(object):

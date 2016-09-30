@@ -1,8 +1,7 @@
 import numpy as np
+from laplacian import Laplacian
 from numpy.polynomial import legendre
-
-from spatial.laplacian import Laplacian
-from spatial.utils import cart_to_sph
+from .utils import cart_to_sph
 
 
 class ElectricField(Laplacian):

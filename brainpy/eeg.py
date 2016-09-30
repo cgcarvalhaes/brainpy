@@ -1,17 +1,12 @@
 import numpy as np
-
-from spatial.electric_field import ElectricField
-
-
-# TODO: check if data reader is a valid function
-# TODO: garbage collector
-from spatial.laplacian import Laplacian
-from utils.utils import group_labels
+from etc import group_labels
+from laplacian import Laplacian
+from .electric_field import ElectricField
 
 
 class EEG(object):
     def __init__(self, data=None, trial_size=None, electrodes=None, subject=None, sampling_rate=1e3, trial_labels=None,
-                 data_reader=None, is_laplacian=False, is_electric_field=False):
+                 data_reader=None, is_laplacian=False, is_electric_field=False, filename=None):
         self.trial_size = trial_size
         self.data = data
         if self.data is None:
@@ -28,6 +23,7 @@ class EEG(object):
         self._cache = dict()
         self._is_laplacian = is_laplacian
         self._is_electric_field = is_electric_field
+        self.filename = filename
 
     # TODO: allow coordinate transformations (e.g., spherical)
     @property
@@ -215,6 +211,15 @@ class EEG(object):
 
     # TODO: check if filename is valid
     # TODO: check keys before updating
-    def read(self, filename):
-        self.__dict__.update(self.data_reader(filename))
+    # TODO: delete current data and call garbage collector before loading new data
+    def read(self, filename, **kwargs):
+        d = self.data_reader(filename, **kwargs)
+        if 'is_laplacian' not in d:
+            d['is_laplacian'] = False
+        if 'is_electric_field' not in d:
+            d['is_electric_field'] = False
+        if 'filename' not in d:
+            d['filename'] = filename
+        self.__dict__.update(d)
+        self._check_valid_data_format()
         return self
