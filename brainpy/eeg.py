@@ -1,29 +1,41 @@
 import numpy as np
 from etc import group_labels
 from laplacian import Laplacian
+from utils import file_exists
+
 from .electric_field import ElectricField
 
 
 class EEG(object):
-    def __init__(self, data=None, trial_size=None, electrodes=None, subject=None, sampling_rate=1e3, trial_labels=None,
-                 data_reader=None, is_laplacian=False, is_electric_field=False, filename=None):
+    DEFAULT_SAMPLING_RATE = 1e3
+
+    def __init__(self, data=None, trial_size=None, electrodes=None, subject=None, sampling_rate=DEFAULT_SAMPLING_RATE,
+                 trial_labels=None, data_reader=None, is_laplacian=False, is_electric_field=False, filename=None):
         self.trial_size = trial_size
         self.data = data
         if self.data is None:
             self.data = np.array([])
-        self.electrodes = electrodes
-        if self.electrodes is None:
-            self.electrodes = []
+        self._electrodes = electrodes
+        if self._electrodes is None:
+            self._electrodes = []
         self.subject = subject
         self.sampling_rate = sampling_rate
-        self.trial_labels = trial_labels
-        if self.trial_labels is None:
-            self.trial_labels = np.array([])
+        self._trial_labels = trial_labels
+        if self._trial_labels is None:
+            self._trial_labels = np.array([])
         self.data_reader = data_reader
         self._cache = dict()
         self._is_laplacian = is_laplacian
         self._is_electric_field = is_electric_field
         self.filename = filename
+
+    @property
+    def trial_labels(self):
+        return np.asarray(self._trial_labels)
+
+    @property
+    def electrodes(self):
+        return list(self._electrodes)
 
     # TODO: allow coordinate transformations (e.g., spherical)
     @property
@@ -115,7 +127,7 @@ class EEG(object):
         dta = np.zeros((self.n_channels, self.trial_size, len(index_list)))
         for j, index in enumerate(index_list):
             beg, end = self.get_trial_beg_end(index)
-            dta[:, :, j] = self.data[beg:end]
+            dta[:, :, j] = self.data[:, beg:end]
         if new_axis:
             return dta
         return dta.reshape((self.n_channels, -1), order='F')
@@ -186,9 +198,7 @@ class EEG(object):
 
     def average_trials(self, group_size, inplace=False):
         self._check_valid_data_format(check_trial_data=True)
-        groups, self.trial_labels = group_labels(self.trial_labels, group_size)
-        if inplace:
-            self.data = self.data[:, :(len(self.trial_labels)*self.trial_size)]
+        groups, self._trial_labels = group_labels(self.trial_labels, group_size)
         data_new = None
         for n, indexes in enumerate(groups):
             x = self.get_trials(indexes, new_axis=True).mean(axis=2)
@@ -198,6 +208,7 @@ class EEG(object):
             else:
                 data_new = x if data_new is None else np.c_[data_new, x]
         if inplace:
+            self.data = self.data[:, :(len(self.trial_labels) * self.trial_size)]
             return self
         return self._clone(data=data_new)
 
@@ -209,17 +220,20 @@ class EEG(object):
         self.get_elect_coords()
         return self
 
-    # TODO: check if filename is valid
-    # TODO: check keys before updating
-    # TODO: delete current data and call garbage collector before loading new data
     def read(self, filename, **kwargs):
+        if not file_exists(filename):
+            raise IOError("File '{0}' does not exist" % filename)
         d = self.data_reader(filename, **kwargs)
-        if 'is_laplacian' not in d:
-            d['is_laplacian'] = False
-        if 'is_electric_field' not in d:
-            d['is_electric_field'] = False
-        if 'filename' not in d:
-            d['filename'] = filename
-        self.__dict__.update(d)
+        self.trial_size = d.get('trial_size', 1)
+        self.data = d.get('data', np.array([]))
+        self._electrodes = list(d.get('electrodes', []))
+        self.subject = d.get('subject', '')
+        self.sampling_rate = d.get('sampling_rate', self.DEFAULT_SAMPLING_RATE)
+        self._trial_labels = np.asarray(d.get('trial_labels', []))
+        self.data_reader = d.get('data_reader', self.data_reader)
+        self._is_laplacian = d.get('is_laplacian', False)
+        self._is_electric_field = d.get('is_electric_field', False)
+        self.filename = filename
         self._check_valid_data_format()
+        self.clear_cache()
         return self

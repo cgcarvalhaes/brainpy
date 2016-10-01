@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 from scipy import optimize
 from scipy.interpolate import interp1d
@@ -33,3 +35,21 @@ def cubic_splines_interpolation(x, y, x0):
     k = x.argsort()
     cubic_splines = interp1d(x[k], y[k], kind='cubic')
     return cubic_splines(x0)
+
+
+def path_exists(p):
+    return os.path.isdir(p)
+
+
+def is_valid_output_filename(file_name, exclude_existing=False):
+    if os.path.isdir(file_name):
+        return False
+    elif os.path.isfile(file_name):
+        return exclude_existing
+    else:
+        path = os.path.dirname(file_name)
+        return path_exists(path)
+
+
+def file_exists(file_name):
+    return os.path.isfile(file_name)
