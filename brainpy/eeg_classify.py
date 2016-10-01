@@ -11,17 +11,24 @@ class EEGClassify(EEG):
         self.random_state = random_state
         self.test_proportion = test_proportion
         self.clf = clf
+        self.test = np.array([])
+        self.predictions = np.array([])
+        self.scores = np.array([])
 
-    def classify(self):
-        result = {}
+    def classify(self, verbose=True):
         for ch in range(self.n_channels):
             x_train, x_test, y_train, y_test = train_test_split(self.data[ch, :].reshape((-1, self.trial_size)),
-                                                                self.trial_labels.astype(np.int32),
-                                                                test_size=self.test_proportion,
-                                                                random_state=self.random_state)
+                                                                   self.trial_labels.astype(np.int32),
+                                                                   test_size=self.test_proportion,
+                                                                   random_state=self.random_state)
+            if ch == 0:
+                self.test = np.zeros((self.n_channels, len(y_test)))
+                self.predictions = np.zeros_like(self.test)
+                self.scores = np.zeros(self.n_channels)
             self.clf.fit(x_train, y_train)
-            y_pred = self.clf.predict(x_test)
-            score = accuracy_score(y_test, y_pred)
-            result[ch] = score
-            print "Channel {0}:\t{1}%%".format(ch, 100*score)
-        return result
+            self.test = y_test
+            self.predictions[ch, :] = self.clf.predict(x_test)
+            self.scores[ch] = accuracy_score(y_test, self.predictions[ch])
+            if verbose:
+                print "Channel %s: %.0f%%" % (ch, 100*self.scores[ch])
+        return self
