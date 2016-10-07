@@ -39,7 +39,7 @@ class EEG(object):
 
     @property
     def n_channels(self):
-        return len(self.data)
+        return self.data.shape[0]
 
     @property
     def n_samples(self):
@@ -65,6 +65,22 @@ class EEG(object):
     def has_electrodes(self):
         return len(self.electrodes) > 0
 
+    @property
+    def shape(self):
+        return self.data.shape
+
+    @property
+    def is_potential(self):
+        return not self._is_laplacian and not self._is_electric_field
+
+    @property
+    def is_laplacian(self):
+        return self._is_laplacian
+
+    @property
+    def is_electric_field(self):
+        return self._is_electric_field
+
     def _check_valid_data_format(self, check_trial_data=False):
         if check_trial_data and not self.has_trials:
             raise ValueError("{0}: Data has no trial to be manipulated".format(self.this))
@@ -89,10 +105,6 @@ class EEG(object):
                 raise ValueError("{0}: Data has no labeled trials".format(self.this))
         return True
 
-    def _check_potential(self):
-        if self._is_laplacian or self._is_electric_field:
-            raise TypeError("{0}: transformation can only be applied to the electric potential".format(self.this))
-
     def _get_cache_data(self, key):
         return self._cache.get(key)
 
@@ -106,13 +118,16 @@ class EEG(object):
         d.update(kwargs)
         return EEG(data=d.pop('data', self.data), **d)
 
-    # TODO: allow coordinate transformations (e.g., spherical)
-    def get_elect_coords(self):
-        ecoords = self._get_cache_data('elect_coord')
-        if ecoords is None:
-            ecoords = np.array([[e.get(k, np.nan) for k in 'xyz'] for e in self.electrodes if isinstance(e, dict)])
-            self._set_cache_data('elect_coord', ecoords)
-        return ecoords
+    # TODO: accept spherical as a parameter
+    def get_elect_coords(self, normalize=False):
+        cache_name = 'elect_coord_normal' if normalize else 'elect_coord'
+        coord = self._get_cache_data(cache_name)
+        if coord is None:
+            coord = np.array([[e.get(k, 1) for k in 'xyz'] for e in self.electrodes if isinstance(e, dict)])
+        if normalize:
+            coord /= np.linalg.norm(coord, axis=1)[:, np.newaxis]
+        self._set_cache_data(cache_name, coord)
+        return coord
 
     def get_elect_labels(self):
         elabs = self._get_cache_data('elect_coord')
@@ -134,42 +149,22 @@ class EEG(object):
         self._cache = dict()
         return self
 
+    def spatial_transform(self, t, inplace=False, **clone_params):
+        if not self.is_potential:
+            raise TypeError("{0}: can only transform potential data".format(self.this))
+        self._check_valid_data_format()
+        if inplace:
+            self.data = t.transform(self.data)
+            return self
+        return self._clone(data=t.transform(self.data), **clone_params)
+
     def get_laplacian(self, lambda_value=1e-2, m=3, truncation=100, inplace=False):
-        self._check_potential()
-        self._check_valid_data_format()
-        self.normalize_elect_coords()
-        lap = Laplacian(self.get_elect_coords(), m, truncation).eval(lambda_value=lambda_value)
-        if inplace:
-            self.data = lap.transform(self.data)
-            return self
-        return self._clone(data=lap.transform(self.data), is_laplacian=True, is_electric_field=False)
+        lap = Laplacian(self.get_elect_coords(normalize=True), m, truncation).eval(lambda_value=lambda_value)
+        return self.spatial_transform(lap, inplace=inplace, is_laplacian=True, is_electric_field=False)
 
-    # FIXME:
     def get_electric_field(self, lambda_value=1e-2, m=3, inplace=False):
-        self._check_potential()
-        self._check_valid_data_format()
-        self.normalize_elect_coords()
-        ef = ElectricField(self.get_elect_coords(), m).eval(lambda_value=lambda_value).transform(self.data)
-        if not self.has_trials:
-            if inplace:
-                self.data = ef.transform(self.data)
-                self.trial_size *= 3
-                return self
-            else:
-                return self._clone(data=ef.transform(self.data), is_laplacian=False, is_electric_field=True)
-
-        data_new = None
-        for k in xrange(self.n_trials):
-            beg, end = self.get_trial_beg_end(k)
-            trial = np.c_[ef[:self.n_channels, beg:end],
-                          ef[self.n_channels:2 * self.n_channels, beg:end],
-                          ef[2 * self.n_channels:, beg:end]]
-            data_new = trial if data_new is None else np.c_[data_new, trial]
-        if inplace:
-            self.data = data_new
-            self.trial_size *= 3
-            return self
-        return self._clone(data=data_new, is_laplacian=False, is_electric_field=True)
+        ef = ElectricField(self.get_elect_coords(normalize=True), m).eval(lambda_value=lambda_value)
+        return self.spatial_transform(ef, inplace=inplace, is_laplacian=False, is_electric_field=True)
 
     def get_trial_beg_end(self, index):
         beg = index * self.trial_size
@@ -212,17 +207,9 @@ class EEG(object):
             return self
         return self._clone(data=data_new)
 
-    def normalize_elect_coords(self):
-        for e in self._electrodes:
-            r = np.linalg.norm([e['x'], e['y'], e['z']])
-            e.update({'x': e['x'] / r, 'y': e['y'] /r, 'z': e['z'] / r})
-        # call get_elect_coords to update the cache
-        self.get_elect_coords()
-        return self
-
     def read(self, filename, **kwargs):
         if not file_exists(filename):
-            raise IOError("File '{0}' does not exist" % filename)
+            raise IOError("File '{0}' does not exist".format(filename))
         d = self.data_reader(filename, **kwargs)
         self.trial_size = d.get('trial_size', 1)
         self.data = d.get('data', np.array([]))

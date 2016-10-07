@@ -18,9 +18,9 @@ class EEGClassify(EEG):
     def classify(self, verbose=True):
         for ch in range(self.n_channels):
             x_train, x_test, y_train, y_test = train_test_split(self.data[ch, :].reshape((-1, self.trial_size)),
-                                                                   self.trial_labels.astype(np.int32),
-                                                                   test_size=self.test_proportion,
-                                                                   random_state=self.random_state)
+                                                                self.trial_labels.astype(np.int32),
+                                                                test_size=self.test_proportion,
+                                                                random_state=self.random_state)
             if ch == 0:
                 self.test = np.zeros((self.n_channels, len(y_test)))
                 self.predictions = np.zeros_like(self.test)
@@ -30,5 +30,5 @@ class EEGClassify(EEG):
             self.predictions[ch, :] = self.clf.predict(x_test)
             self.scores[ch] = accuracy_score(y_test, self.predictions[ch])
             if verbose:
-                print "Channel %s: %.0f%%" % (ch, 100*self.scores[ch])
+                print "Channel %s: %.0f%%" % (ch, 100 * self.scores[ch])
         return self
