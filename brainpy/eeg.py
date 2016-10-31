@@ -17,7 +17,7 @@ class EEG(object):
             self.data = np.array([])
         self._electrodes = electrodes
         if self._electrodes is None:
-            self._electrodes = []
+            self._electrodes = dict()
         self.subject = subject
         self.sampling_rate = sampling_rate
         self._trial_labels = trial_labels
@@ -28,6 +28,24 @@ class EEG(object):
         self._is_laplacian = is_laplacian
         self._is_electric_field = is_electric_field
         self.filename = filename
+        self.group_size = 1
+
+    def get_params(self):
+        return {
+            "trial_size": self.trial_size,
+            "data_shape": self.data.shape,
+            "electrodes": self.electrodes,
+            "subject": self.subject,
+            "sampling_rate": self.sampling_rate,
+            "trial_labels": self.trial_labels,
+            "is_laplacian": self.is_laplacian,
+            "is_electric_field": self.is_electric_field,
+            "filename": self.filename,
+            "group_size": self.group_size,
+            "n_channels": self.n_channels,
+            "n_trials": self.n_trials,
+            "n_comps": self.n_comps,
+        }
 
     @property
     def trial_labels(self):
@@ -54,7 +72,11 @@ class EEG(object):
         return 1
 
     @property
-    def this(self):
+    def n_comps(self):
+        return 0 if self.data.ndim == 2 else self.data.shape[2]
+
+    @property
+    def class_name(self):
         return self.__class__.__name__
 
     @property
@@ -83,26 +105,26 @@ class EEG(object):
 
     def _check_valid_data_format(self, check_trial_data=False):
         if check_trial_data and not self.has_trials:
-            raise ValueError("{0}: Data has no trial to be manipulated".format(self.this))
+            raise ValueError("{0}: Data has no trial to be manipulated".format(self.class_name))
         if self.has_trials:
             n = self.n_samples / float(self.trial_size)
             if n != int(n):
                 raise ValueError("{0}: Invalid data format. Number of samples must be a multiple of the trial length"
-                                 .format(self.this))
+                                 .format(self.class_name))
         if self.has_electrodes and len(self.electrodes) != self.n_channels:
-            raise ValueError("{0}: Invalid data format".format(self.this))
+            raise ValueError("{0}: Invalid data format".format(self.class_name))
         return True
 
     def _check_valid_trial_index(self, index):
         if self.has_trials:
             if index < 0:
-                raise ValueError("{0}: trial index must be a non-negative number".format(self.this))
+                raise ValueError("{0}: trial index must be a non-negative number".format(self.class_name))
             elif index >= self.n_trials:
                 raise ValueError("{0}: invalid trial index. Data has {1} trials, got index {2}"
-                                 .format(self.this, self.n_trials, index))
+                                 .format(self.class_name, self.n_trials, index))
         else:
             if index != 0:
-                raise ValueError("{0}: Data has no labeled trials".format(self.this))
+                raise ValueError("{0}: Data has no labeled trials".format(self.class_name))
         return True
 
     def _get_cache_data(self, key):
@@ -137,6 +159,11 @@ class EEG(object):
         return elabs
 
     def get_trials(self, index_list, new_axis=False):
+        if self.n_comps == 0:
+            return self._get_trials2d(index_list, new_axis)
+        return self._get_trials3d(index_list, new_axis)
+
+    def _get_trials2d(self, index_list, new_axis):
         dta = np.zeros((self.n_channels, self.trial_size, len(index_list)))
         for j, index in enumerate(index_list):
             beg, end = self.get_trial_beg_end(index)
@@ -145,13 +172,22 @@ class EEG(object):
             return dta
         return dta.reshape((self.n_channels, -1), order='F')
 
+    def _get_trials3d(self, index_list, new_axis):
+        dta = np.zeros((self.n_channels, self.trial_size, self.data.shape[2], len(index_list)))
+        for j, index in enumerate(index_list):
+            beg, end = self.get_trial_beg_end(index)
+            dta[:, :, :, j] = self.data[:, beg:end, :]
+        if new_axis:
+            return dta.transpose((0, 1, 3, 2))
+        return dta.reshape((self.n_channels, -1, self.data.shape[2]), order='F')
+
     def clear_cache(self):
         self._cache = dict()
         return self
 
     def spatial_transform(self, t, inplace=False, **clone_params):
         if not self.is_potential:
-            raise TypeError("{0}: can only transform potential data".format(self.this))
+            raise TypeError("{0}: can only transform potential data".format(self.class_name))
         self._check_valid_data_format()
         if inplace:
             self.data = t.transform(self.data)
@@ -192,6 +228,8 @@ class EEG(object):
         return self._clone(data=data_new)
 
     def average_trials(self, group_size, inplace=False):
+        if group_size == 1:
+            return self
         self._check_valid_data_format(check_trial_data=True)
         groups, self._trial_labels = group_labels(self.trial_labels, group_size)
         data_new = None
@@ -200,6 +238,7 @@ class EEG(object):
             if inplace:
                 beg, end = self.get_trial_beg_end(n)
                 self.data[:, beg:end] = x
+                self.group_size = group_size
             else:
                 data_new = x if data_new is None else np.c_[data_new, x]
         if inplace:
@@ -220,6 +259,7 @@ class EEG(object):
         self.data_reader = d.get('data_reader', self.data_reader)
         self._is_laplacian = d.get('is_laplacian', False)
         self._is_electric_field = d.get('is_electric_field', False)
+        self.group_size = d.get('group_size', 1)
         self.filename = filename
         self._check_valid_data_format()
         self.clear_cache()

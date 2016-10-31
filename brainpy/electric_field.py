@@ -33,4 +33,6 @@ class ElectricField(Laplacian):
         return self
 
     def transform(self, data):
-        return np.r_[super(ElectricField, self).transform(data), np.dot(self.theta_mat, data), np.dot(self.phi_mat, data)]
+        return np.transpose(np.array([super(ElectricField, self).transform(data),
+                                      np.dot(self.theta_mat, data),
+                                      np.dot(self.phi_mat, data)]), (1, 2, 0))
