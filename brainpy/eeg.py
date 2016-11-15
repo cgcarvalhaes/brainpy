@@ -1,3 +1,6 @@
+import hashlib
+import json
+
 import numpy as np
 from etc import group_labels
 from laplacian import Laplacian
@@ -8,9 +11,11 @@ from .electric_field import ElectricField
 
 class EEG(object):
     DEFAULT_SAMPLING_RATE = 1e3
+    DERIVATIONS = ['potential', 'laplacian', 'electric field']
 
     def __init__(self, data=None, trial_size=None, electrodes=None, subject=None, sampling_rate=DEFAULT_SAMPLING_RATE,
-                 trial_labels=None, data_reader=None, is_laplacian=False, is_electric_field=False, filename=None):
+                 trial_labels=None, data_reader=None, is_laplacian=False, is_electric_field=False, filename=None,
+                 lambda_value=1e-2, interpol_order=3, truncation=100):
         self.trial_size = trial_size
         self.data = data
         if self.data is None:
@@ -25,10 +30,12 @@ class EEG(object):
             self._trial_labels = np.array([])
         self.data_reader = data_reader
         self._cache = dict()
-        self._is_laplacian = is_laplacian
-        self._is_electric_field = is_electric_field
+        self.der_code = 0
         self.filename = filename
         self.group_size = 1
+        self.lambda_value = lambda_value
+        self.interpol_order = interpol_order
+        self.truncation = truncation
 
     def get_params(self):
         return {
@@ -38,14 +45,28 @@ class EEG(object):
             "subject": self.subject,
             "sampling_rate": self.sampling_rate,
             "trial_labels": self.trial_labels,
-            "is_laplacian": self.is_laplacian,
-            "is_electric_field": self.is_electric_field,
             "filename": self.filename,
             "group_size": self.group_size,
             "n_channels": self.n_channels,
             "n_trials": self.n_trials,
             "n_comps": self.n_comps,
+            "der_code": self.der_code,
+            "lambda_value": self.lambda_value,
+            "interpol_order": self.interpol_order,
+            "truncation": self.truncation
         }
+
+    def __str__(self):
+        return '%s: ' % self.derivation + object.__str__(self)
+
+    @property
+    def identifier(self):
+        word = json.dumps(self.get_params())
+        return hashlib.md5(word).hexdigest()
+
+    @property
+    def derivation(self):
+        return self.DERIVATIONS[self.der_code]
 
     @property
     def trial_labels(self):
@@ -93,15 +114,15 @@ class EEG(object):
 
     @property
     def is_potential(self):
-        return not self._is_laplacian and not self._is_electric_field
+        return self.der_code == 0
 
     @property
     def is_laplacian(self):
-        return self._is_laplacian
+        return self.der_code == 1
 
     @property
     def is_electric_field(self):
-        return self._is_electric_field
+        return self.der_code == 2
 
     def _check_valid_data_format(self, check_trial_data=False):
         if check_trial_data and not self.has_trials:
@@ -140,7 +161,7 @@ class EEG(object):
         d.update(kwargs)
         return EEG(data=d.pop('data', self.data), **d)
 
-    # TODO: accept spherical as a parameter
+    # TODO: accept spherical coordinates as a parameter
     def get_elect_coords(self, normalize=False):
         cache_name = 'elect_coord_normal' if normalize else 'elect_coord'
         coord = self._get_cache_data(cache_name)
@@ -194,13 +215,15 @@ class EEG(object):
             return self
         return self._clone(data=t.transform(self.data), **clone_params)
 
-    def get_laplacian(self, lambda_value=1e-2, m=3, truncation=100, inplace=False):
-        lap = Laplacian(self.get_elect_coords(normalize=True), m, truncation).eval(lambda_value=lambda_value)
-        return self.spatial_transform(lap, inplace=inplace, is_laplacian=True, is_electric_field=False)
+    def get_laplacian(self, inplace=False):
+        lap = Laplacian(self.get_elect_coords(normalize=True), self.interpol_order, truncation=self.truncation)\
+            .eval(lambda_value=self.lambda_value)
+        return self.spatial_transform(lap, inplace=inplace, der_code=1)
 
-    def get_electric_field(self, lambda_value=1e-2, m=3, inplace=False):
-        ef = ElectricField(self.get_elect_coords(normalize=True), m).eval(lambda_value=lambda_value)
-        return self.spatial_transform(ef, inplace=inplace, is_laplacian=False, is_electric_field=True)
+    def get_electric_field(self, inplace=False):
+        ef = ElectricField(self.get_elect_coords(normalize=True), self.interpol_order, truncation=self.truncation)\
+            .eval(lambda_value=self.lambda_value)
+        return self.spatial_transform(ef, inplace=inplace, der_code=2)
 
     def get_trial_beg_end(self, index):
         beg = index * self.trial_size
@@ -257,8 +280,7 @@ class EEG(object):
         self.sampling_rate = d.get('sampling_rate', self.DEFAULT_SAMPLING_RATE)
         self._trial_labels = np.asarray(d.get('trial_labels', []))
         self.data_reader = d.get('data_reader', self.data_reader)
-        self._is_laplacian = d.get('is_laplacian', False)
-        self._is_electric_field = d.get('is_electric_field', False)
+        self.der_code = d.get('der_code', 0)
         self.group_size = d.get('group_size', 1)
         self.filename = filename
         self._check_valid_data_format()
