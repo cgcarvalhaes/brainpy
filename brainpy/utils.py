@@ -53,3 +53,14 @@ def is_valid_output_filename(file_name, exclude_existing=False):
 
 def file_exists(file_name):
     return os.path.isfile(file_name)
+
+
+def json_default(obj):
+    if isinstance(obj, set):
+        return list(obj)
+    # convert numpy types such as np.ndarray, np.float64, np.int32, etc to equivalent regular types
+    if hasattr(obj, 'tolist'):
+        return obj.tolist()
+    if obj.__class__.__name__ == 'function':
+        return 'function %s' % obj.__name__
+    return obj.__dict__

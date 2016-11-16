@@ -4,7 +4,7 @@ import json
 import numpy as np
 from etc import group_labels
 from laplacian import Laplacian
-from utils import file_exists
+from utils import file_exists, json_default
 
 from .electric_field import ElectricField
 
@@ -61,7 +61,7 @@ class EEG(object):
 
     @property
     def identifier(self):
-        word = json.dumps(self.get_params())
+        word = json.dumps(self.get_params(), default=json_default)
         return hashlib.md5(word).hexdigest()
 
     @property
