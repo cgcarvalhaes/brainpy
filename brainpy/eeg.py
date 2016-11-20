@@ -37,12 +37,13 @@ class EEG(object):
         self.interpol_order = interpol_order
         self.truncation = truncation
 
-    def get_params(self):
+    @property
+    def doc(self):
         return {
-            "trial_size": self.trial_size,
-            "data_shape": self.data.shape,
+            "trial_size": json_default(self.trial_size),
+            "data_shape": json_default(self.data.shape),
             "electrodes": self.electrodes,
-            "subject": self.subject,
+            "subject": json_default(self.subject),
             "sampling_rate": self.sampling_rate,
             "trial_labels": self.trial_labels,
             "filename": self.filename,
@@ -61,7 +62,7 @@ class EEG(object):
 
     @property
     def identifier(self):
-        word = json.dumps(self.get_params(), default=json_default)
+        word = json.dumps(self.doc, default=json_default)
         return hashlib.md5(word).hexdigest()
 
     @property

@@ -63,4 +63,6 @@ def json_default(obj):
         return obj.tolist()
     if obj.__class__.__name__ == 'function':
         return 'function %s' % obj.__name__
-    return obj.__dict__
+    if hasattr(obj, '__dict__'):
+        return obj.__dict__
+    return obj
