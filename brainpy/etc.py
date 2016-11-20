@@ -1,7 +1,7 @@
 from collections import defaultdict
 
 
-def group_labels(labels, group_size):
+def regroup_labels(labels, group_size):
     groups, new_labels = [], []
     pool = defaultdict(list)
     for index, lab in enumerate(labels):

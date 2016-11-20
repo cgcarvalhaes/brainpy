@@ -2,7 +2,7 @@ import hashlib
 import json
 
 import numpy as np
-from etc import group_labels
+from etc import regroup_labels
 from laplacian import Laplacian
 from utils import file_exists, json_default
 
@@ -11,7 +11,7 @@ from .electric_field import ElectricField
 
 class EEG(object):
     DEFAULT_SAMPLING_RATE = 1e3
-    DERIVATIONS = ['potential', 'laplacian', 'electric field']
+    DERIVATIONS = ['potential', 'laplacian', 'electric_field']
 
     def __init__(self, data=None, trial_size=None, electrodes=None, subject=None, sampling_rate=DEFAULT_SAMPLING_RATE,
                  trial_labels=None, data_reader=None, is_laplacian=False, is_electric_field=False, filename=None,
@@ -19,7 +19,7 @@ class EEG(object):
         self.trial_size = trial_size
         self.data = data
         if self.data is None:
-            self.data = np.array([])
+            self.data = np.empty((1, 1, 1))
         self._electrodes = electrodes
         if self._electrodes is None:
             self._electrodes = dict()
@@ -51,7 +51,7 @@ class EEG(object):
             "n_channels": self.n_channels,
             "n_trials": self.n_trials,
             "n_comps": self.n_comps,
-            "der_code": self.der_code,
+            "derivation": self.derivation,
             "lambda_value": self.lambda_value,
             "interpol_order": self.interpol_order,
             "truncation": self.truncation
@@ -83,9 +83,7 @@ class EEG(object):
 
     @property
     def n_samples(self):
-        if self.data.ndim > 1:
-            return self.data.shape[1]
-        return 0
+        return self.data.shape[1]
 
     @property
     def n_trials(self):
@@ -95,7 +93,7 @@ class EEG(object):
 
     @property
     def n_comps(self):
-        return 0 if self.data.ndim == 2 else self.data.shape[2]
+        return self.data.shape[2]
 
     @property
     def class_name(self):
@@ -127,7 +125,7 @@ class EEG(object):
 
     def _check_valid_data_format(self, check_trial_data=False):
         if check_trial_data and not self.has_trials:
-            raise ValueError("{0}: Data has no trial to be manipulated".format(self.class_name))
+            raise ValueError("{0}: Data has no trials to be manipulated".format(self.class_name))
         if self.has_trials:
             n = self.n_samples / float(self.trial_size)
             if n != int(n):
@@ -144,9 +142,8 @@ class EEG(object):
             elif index >= self.n_trials:
                 raise ValueError("{0}: invalid trial index. Data has {1} trials, got index {2}"
                                  .format(self.class_name, self.n_trials, index))
-        else:
-            if index != 0:
-                raise ValueError("{0}: Data has no labeled trials".format(self.class_name))
+        elif index != 0:
+            raise ValueError("{0}: Data has no labeled trials".format(self.class_name))
         return True
 
     def _get_cache_data(self, key):
@@ -181,27 +178,20 @@ class EEG(object):
         return elabs
 
     def get_trials(self, index_list, new_axis=False):
-        if self.n_comps == 0:
-            return self._get_trials2d(index_list, new_axis)
-        return self._get_trials3d(index_list, new_axis)
-
-    def _get_trials2d(self, index_list, new_axis):
-        dta = np.zeros((self.n_channels, self.trial_size, len(index_list)))
-        for j, index in enumerate(index_list):
-            beg, end = self.get_trial_beg_end(index)
-            dta[:, :, j] = self.data[:, beg:end]
         if new_axis:
-            return dta
-        return dta.reshape((self.n_channels, -1), order='F')
+            dta = np.zeros((self.n_channels, self.trial_size, self.n_comps, len(index_list)))
+            for j, index in enumerate(index_list):
+                dta[:, :, :, j] = self.get_single_trial(index)
+        else:
+            dta = np.zeros((self.n_channels, self.trial_size * len(index_list), self.n_comps))
+            for j, index in enumerate(index_list):
+                k = j * self.trial_size
+                dta[:,  k:(k + self.trial_size), :] = self.get_single_trial(index)
+        return dta
 
-    def _get_trials3d(self, index_list, new_axis):
-        dta = np.zeros((self.n_channels, self.trial_size, self.data.shape[2], len(index_list)))
-        for j, index in enumerate(index_list):
-            beg, end = self.get_trial_beg_end(index)
-            dta[:, :, :, j] = self.data[:, beg:end, :]
-        if new_axis:
-            return dta.transpose((0, 1, 3, 2))
-        return dta.reshape((self.n_channels, -1, self.data.shape[2]), order='F')
+    def get_single_trial(self, index):
+        beg, end = self.get_trial_beg_end(index)
+        return self.data[:, beg:end, :]
 
     def clear_cache(self):
         self._cache = dict()
@@ -231,44 +221,29 @@ class EEG(object):
         end = beg + self.trial_size
         return beg, end
 
-    def spectral_decomp(self, min_freq=1, max_freq=50, n_bins=10, inplace=False):
-        time_step = 1. / self.sampling_rate
-        freqs = np.fft.fftfreq(self.trial_size, d=time_step)
-        bins = np.linspace(min_freq, max_freq, n_bins)
-        bin_limits = zip(bins[:-1], bins[1:])
-        data_new = None
-        for n in xrange(self.n_channels):
-            y = self.data[n, :]
-            ps = np.abs(np.fft.fft(y)) ** 2
-            power_bins = np.array([ps[:, (freqs >= f1) & (freqs < f2)].sum(axis=1) for f1, f2 in bin_limits]).T.ravel()[None, :]
-            if inplace:
-                self.data[n, :len(power_bins)] = power_bins
-            else:
-                data_new = power_bins if data_new is None else np.r_[data_new, power_bins]
-        if inplace:
-            self.trial_size = n_bins
-            self.data = self.data[:, :(len(self.trial_labels)*self.trial_size)]
-            return self
-        return self._clone(data=data_new)
+    def get_channels(self, channel_list):
+        return self.data[channel_list, :]
 
     def average_trials(self, group_size, inplace=False):
         if group_size == 1:
             return self
         self._check_valid_data_format(check_trial_data=True)
-        groups, self._trial_labels = group_labels(self.trial_labels, group_size)
-        data_new = None
-        for n, indexes in enumerate(groups):
-            x = self.get_trials(indexes, new_axis=True).mean(axis=2)
-            if inplace:
-                beg, end = self.get_trial_beg_end(n)
-                self.data[:, beg:end] = x
-                self.group_size = group_size
-            else:
-                data_new = x if data_new is None else np.c_[data_new, x]
+        groups, self._trial_labels = regroup_labels(self.trial_labels, group_size)
         if inplace:
+            for n, indexes in enumerate(groups):
+                x = self.get_trials(indexes, new_axis=True).mean(axis=3)
+                beg, end = self.get_trial_beg_end(n)
+                self.data[:, beg:end, :] = x
+                self.group_size = group_size
             self.data = self.data[:, :(len(self.trial_labels) * self.trial_size)]
             return self
-        return self._clone(data=data_new)
+        else:
+            data_new = np.zeros((self.n_channels, self.trial_size * len(self._trial_labels), self.n_comps))
+            for n, indexes in enumerate(groups):
+                x = self.get_trials(indexes, new_axis=True).mean(axis=3)
+                beg, end = self.get_trial_beg_end(n)
+                data_new[:, beg:end, :] = x
+            return self._clone(data=data_new)
 
     def read(self, filename, **kwargs):
         if not file_exists(filename):
@@ -287,3 +262,26 @@ class EEG(object):
         self._check_valid_data_format()
         self.clear_cache()
         return self
+
+    # TODO: It will be turned into a feature extraction object for classification at some point
+    def spectral_decomp(self, min_freq=1, max_freq=50, n_bins=10, inplace=False):
+        time_step = 1. / self.sampling_rate
+        freqs = np.fft.fftfreq(self.trial_size, d=time_step)
+        bins = np.linspace(min_freq, max_freq, n_bins)
+        bin_limits = zip(bins[:-1], bins[1:])
+        data_new = None
+        for n in xrange(self.n_channels):
+            y = self.data[n, :]
+            ps = np.abs(np.fft.fft(y)) ** 2
+            power_bins = np.array([ps[:, (freqs >= f1) & (freqs < f2)].sum(axis=1) for f1, f2 in bin_limits]).T.ravel()[
+                         None, :]
+            if inplace:
+                self.data[n, :len(power_bins)] = power_bins
+            else:
+                data_new = power_bins if data_new is None else np.r_[data_new, power_bins]
+        if inplace:
+            self.trial_size = n_bins
+            self.data = self.data[:, :(len(self.trial_labels) * self.trial_size)]
+            return self
+        return self._clone(data=data_new)
+
