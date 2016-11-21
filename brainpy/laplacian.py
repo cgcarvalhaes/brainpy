@@ -16,5 +16,14 @@ class Laplacian(SphericalSplines):
         self.lap_mat = np.dot(self.mat_gm_lap, self.C)
         return self
 
+    def assert_data_shape_is_alright(self, data):
+        if data.ndim not in (2, 3) and data.squeeze().ndim != 2:
+            raise AssertionError("Data must be a two-dimensional array, but got shape %s" % data.shape)
+        return self
+
     def transform(self, data):
-        return np.dot(self.lap_mat, np.asarray(data))
+        self.assert_data_shape_is_alright(data)
+        add_new_axis = data.ndim == 3
+        if add_new_axis:
+            return np.dot(self.lap_mat, data.squeeze())[:, :, np.newaxis]
+        return np.dot(self.lap_mat, data)

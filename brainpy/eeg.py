@@ -2,6 +2,7 @@ import hashlib
 import json
 
 import numpy as np
+from eeg_reshape import eeg_reshape
 from etc import regroup_labels
 from laplacian import Laplacian
 from utils import file_exists, json_default
@@ -244,6 +245,13 @@ class EEG(object):
                 beg, end = self.get_trial_beg_end(n)
                 data_new[:, beg:end, :] = x
             return self._clone(data=data_new)
+
+    def to_clf_format(self, channels=None):
+        if channels is None:
+            channels = range(self.n_channels)
+        if isinstance(channels, (int, np.int)):
+            channels = [channels]
+        return eeg_reshape(self.data[channels, :, :], self.trial_size)
 
     def read(self, filename, **kwargs):
         if not file_exists(filename):
