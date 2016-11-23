@@ -1,11 +1,8 @@
-import hashlib
-import json
-
 import numpy as np
 from eeg_reshape import eeg_reshape
 from etc import regroup_labels
 from laplacian import Laplacian
-from utils import file_exists, json_default
+from utils import file_exists
 
 from .electric_field import ElectricField
 
@@ -41,10 +38,10 @@ class EEG(object):
     @property
     def doc(self):
         return {
-            "trial_size": json_default(self.trial_size),
-            "data_shape": json_default(self.data.shape),
+            "trial_size": self.trial_size,
+            "data_shape": self.data.shape,
             "electrodes": self.electrodes,
-            "subject": json_default(self.subject),
+            "subject": self.subject,
             "sampling_rate": self.sampling_rate,
             "trial_labels": self.trial_labels,
             "filename": self.filename,
@@ -60,11 +57,6 @@ class EEG(object):
 
     def __str__(self):
         return '%s: ' % self.derivation + object.__str__(self)
-
-    @property
-    def identifier(self):
-        word = json.dumps(self.doc, default=json_default)
-        return hashlib.md5(word).hexdigest()
 
     @property
     def derivation(self):
